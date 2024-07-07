@@ -47,6 +47,41 @@ import requests
 from bs4 import BeautifulSoup
 import time
 
+class Parser:
+
+    def __init__(self):
+        pass
+
+    def parse_title(self, article):
+        title_tag = article.find_next_sibling('dd').find('div', class_='list-title')
+        if title_tag:
+            return title_tag.get_text(strip=True).replace('Tittle:', '').strip()
+
+
+    def parse_authors(self, article):
+        author_tags = article.find_next_sibling('dd').find('div', class_='list-authors').find_all('a')
+        if author_tags:
+            return [author.get_text(strip=True) for author in author_tags]
+
+    def parse_subjects(self, article):
+        subject_tag = article.find_next_sibling('dd').find('div', class_='list-subjects')
+        if subject_tag:
+            return subject_tag.get_text(strip=True).replace('Subjects:', '').strip()
+
+    def parse_links(self, article):
+        link_info = {}
+        link_tags = article.find_all('a')
+        for link in link_tags:
+            href = link.get('href')
+            if href and 'abs' in link.get('href'):
+                link_info['abstract'] = link.get('href')
+            if href and 'pdf' in link.get('href'):
+                link_info['pdf'] = link.get('href')
+            if href and 'html' in link.get('href'):
+                link_info['html'] = link.get('href')
+            if href and 'format' in link.get('href'):
+                link_info['other_formats'] = link.get('href')
+        return link_info
 class LinkScraper:
 
     def __init__(self):
@@ -73,19 +108,44 @@ class LinkScraper:
             "quant-ph"
         ]
 
-    def parse_soup(self, soup):
-        authors = []
-        title = ''
-        pdf = ''
-        html = ''
+    def parse_html(self, html_content):
+        soup = BeautifulSoup(html_content, 'html.parser')
+
         save_html = True
         if save_html:
-            with open(f"soup_page2.html", "w", encoding='utf-8') as file:
+            with open(f"soup_page.html", "w", encoding='utf-8') as file:
                 file.write(soup.prettify())
-        #print(soup.prettify())
+
+        articles = soup.find_all('dt')
+        seen_articles = set()
+        article_data = []
+        parser = Parser()
+        for article in articles:
+            article_info = {}
+            article_info['title'] = parser.parse_title(article)
+
+            article_info['authors'] = parser.parse_authors(article)
+            article_info['subjects'] = parser.parse_subjects(article)
+            article_info['links'] = parser.parse_links(article)
+
+            # Add the article information to the list
+            if article_info['title'] in seen_articles:
+                break
+            article_data.append(article_info)
+            seen_articles.add(article_info['title'])
+
+            for data in article_data:
+                print(data)
 
     def parse_soup_test(self):
-        filename = 'soup_page.html'
+        """
+
+
+
+        :return:
+        """
+        print("TESTING")
+        filename = 'soup_page2.html'
         with open(filename, 'r', encoding='utf-8') as file:
             html_content = file.read()
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -93,7 +153,6 @@ class LinkScraper:
         articles = soup.find_all('dt')
         article_data = []
 
-        article_number = 0
         for article in articles:
             article_info = {}
 
@@ -130,9 +189,6 @@ class LinkScraper:
 
             for data in article_data:
                 print(data)
-            article_number +=1
-            if article_number == 10:
-                break
 
 
     def get_links(self):
@@ -158,13 +214,15 @@ class LinkScraper:
                         #get URL data
                         url = f"{base_url}/list/{category}/{year}-{month}?skip={page*page_size}&show={page_size}"
                         print(url)
-                        response = requests.get(url)
-                        if response.status_code != 200:
-                            print(f"Fail to retrive page {url}")
-                            break
 
-                        soup  = BeautifulSoup(response.content, 'html.parser')
-                        data = self.parse_soup(soup)
+                        try:
+                            response = requests.get(url, timeout=10)
+                            response.raise_for_status()
+                        except RequestException as e:
+                            print(f"Error fetching {url}: {e}")
+                            print(f"url status code: {response.status_code}")
+
+                        data = self.parse_html(response.content)
                         break
                         # find article links
                         #links = [a['href'] for a in soup.find_all('a', href=True) if /abs/ in a['href']]
@@ -175,12 +233,11 @@ class LinkScraper:
                         time.sleep(1)
 
 
-
 if __name__ == "__main__":
-    test =  LinkScraper()
-    test.parse_soup_test()
+    # test =  LinkScraper()
+    # test.parse_soup_test()
 
 
-    # arxiv_scraper = LinkScraper()
-    # arxiv_scraper.get_links()
+    arxiv_scraper = LinkScraper()
+    arxiv_scraper.get_links()
 
