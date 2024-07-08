@@ -43,7 +43,6 @@ anticipated issues:
 
 
 """
-import json
 import requests
 import time
 
@@ -54,8 +53,6 @@ from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 
-
-import psycopg2
 
 
 class Parser:
@@ -101,6 +98,8 @@ class Parser:
         return link_info
 
 
+
+
 class Crawler:
 
     def __init__(self, db):
@@ -114,8 +113,12 @@ class Crawler:
         self.base_url = "https://arxiv.org"
         self.db = db
 
-
-
+    def parse_total_entries(self, html_content):
+        soup = BeautifulSoup(html_content,'html.parser')
+        paging_info = soup.find('div', class_='paging').get_text(strip=True)
+        digits = [char for char in paging_info if char.isdigit()]
+        entries = int(''.join(digits))
+        return entries
 
     def parse_html(self, html_content):
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -151,7 +154,7 @@ class Crawler:
         base_url = self.base_url
         months = range(1,13)
         years = range(1991, 2025)
-        page_size = 100
+        page_size = 1000
 
         categories = [
             "econ",
@@ -207,6 +210,7 @@ class Crawler:
 
                     page = 0
                     all_data = []
+                    prior_hash_val = 9999999999999999999
                     while True:
                         #get URL data
                         url = f"{base_url}/list/{category}/{year}-{month}?skip={page*page_size}&show={page_size}"
@@ -220,16 +224,19 @@ class Crawler:
                             print(f"url status code: {response.status_code}")
 
                         data = self.parse_html(response.content)
+                        hash_val = hash(response.content)
+                        entry_number = self.parse_total_entries(response.content)
                         all_data.extend(data)
-                        if not data:
+                        if not data or hash_val==prior_hash_val or page*page_size + page_size > entry_number:
                             print("no more data!")
                             print("page=")
                             print(page)
                             print(len(all_data))
                             break
 
+                        prior_hash_val = hash_val
                         page +=1
-                        time.sleep(1)
+                        time.sleep(15)
                     self.save_data(all_data)
     def save_data(self, data):
         self.db.save_crawler_data(data)
