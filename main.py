@@ -43,15 +43,16 @@ anticipated issues:
 
 
 """
+import json
 import requests
-from bs4 import BeautifulSoup
 import time
 
+from bs4 import BeautifulSoup
 from requests import RequestException
-
 
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 import psycopg2
@@ -102,30 +103,19 @@ class Parser:
 
 class Crawler:
 
-    def __init__(self):
-        self.user_agent = "Googlebot"
-        self.base_url = "https://arxiv.org"
-        self.categories = [
-            "econ",
-            "eecs",
-            "stat",
-            "q-fin",
-            "q-bio",
-            "cs",
-            "math",
-            "asto-ph",
-            "cond-mat",
-            "gr-qc",
-            "hep-ex",
-            "hep-lat",
-            "hep-ph",
-            "hep-th",
-            "nlin",
-            "nucl-ex",
-            "nucl-th",
-            "physics",
-            "quant-ph"
+    def __init__(self, db):
+        self.user_agents = [
+            'Mozilla/5.0 (X11; CrOS x86_64 10066.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36',
+            'XYZ/3.0',
+            'Mozilla/5.0',
+            'Mozilla/5.0 (compatible; Googlebot/2.1; +https://www.google.com/bot.html)'
         ]
+        self.base_url = "https://arxiv.org"
+        self.db = db
+
+
+
 
     def parse_html(self, html_content):
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -157,71 +147,62 @@ class Crawler:
                 print(data)
         return article_data
 
-
-    def parse_soup_test(self):
-
-        print("TESTING")
-        filename = 'soup_page2.html'
-        with open(filename, 'r', encoding='utf-8') as file:
-            html_content = file.read()
-        soup = BeautifulSoup(html_content, 'html.parser')
-
-        articles = soup.find_all('dt')
-        article_data = []
-
-        for article in articles:
-            article_info = {}
-
-            title_tag = article.find_next_sibling('dd').find('div',class_='list-title')
-            if title_tag:
-                article_info['title'] = title_tag.get_text(strip=True).replace('Tittle:', '').strip()
-
-            # Extract the atuthors
-            author_tags = article.find_next_sibling('dd').find('div', class_='list-authors').find_all('a')
-            if author_tags:
-                article_info['authors'] = [author.get_text(strip=True) for author in author_tags]
-
-                # Extract the subjects
-            subject_tag = article.find_next_sibling('dd').find('div', class_='list-subjects')
-            if subject_tag:
-                article_info['subjects'] = subject_tag.get_text(strip=True).replace('Subjects:', '').strip()
-
-            # Extract the links
-            article_info['links'] = {}
-            link_tags = article.find_all('a')
-            for link in link_tags:
-                href = link.get('href')
-                if href and 'abs' in link.get('href'):
-                    article_info['links']['abstract'] = link.get('href')
-                if href and 'pdf' in link.get('href'):
-                    article_info['links']['pdf'] = link.get('href')
-                if href and 'html' in link.get('href'):
-                    article_info['links']['html'] = link.get('href')
-                if href and 'format' in link.get('href'):
-                    article_info['links']['other_formats'] = link.get('href')
-
-            # Add the article information to the list
-            article_data.append(article_info)
-
-            for data in article_data:
-                print(data)
-
     def get_links(self):
         base_url = self.base_url
         months = range(1,13)
         years = range(1991, 2025)
         page_size = 100
 
-        #for now
-        year = 2023
-        month = 10
-        category = "hep-th"
-        years = [year]
-        years = [2020]
-        months = [month]
-        categories = [category]
+        categories = [
+            "econ",
+            "eecs",
+            "stat",
+            "q-fin",
+            "q-bio",
+            "cs",
+            "math",
+            "astro-ph",
+            "cond-mat",
+            "gr-qc",
+            "hep-ex",
+            "hep-lat",
+            "hep-ph",
+            "hep-th",
+            "math-ph",
+            "nlin",
+            "nucl-ex",
+            "nucl-th",
+            "physics",
+            "quant-ph"
+        ]
+
+        years = {
+            "econ": range(2017, 2025),
+            "eecs": range(2017, 2025),
+            "stat": range(2007, 2025),
+            "q-fin": range(2008, 2025),
+            "q-bio": range(2003, 2025),
+            "cs": range(1993, 2025),
+            "math": range(1992, 2025),
+            "astro-ph": range(1992, 2025),
+            "cond-mat": range(1992, 2025),
+            "gr-qc": range(1992, 2025),
+            "hep-ex": range(1994, 2025),
+            "hep-lat": range(1992, 2025),
+            "hep-ph": range(1992, 2025),
+            "hep-th": range(1991, 2025),
+            "math-ph": range(1996, 2025),
+            "nlin": range(1993, 2025),
+            "nucl-ex": range(1994, 2025),
+            "nucl-th": range(1992, 2025),
+            "physics": range(1996, 2025),
+            "quant-ph": range(1994, 2025)
+        }
+
+        categories = ["econ", "eecs"]
         for category in categories:
-            for year in years:
+            year_range = years[category]
+            for year in year_range:
                 for month in months:
 
                     page = 0
@@ -232,7 +213,7 @@ class Crawler:
                         print(url)
 
                         try:
-                            response = requests.get(url, timeout=10)
+                            response = requests.get(url, timeout=10, headers={'User-Agent': self.user_agents[4]})
                             response.raise_for_status()
                         except RequestException as e:
                             print(f"Error fetching {url}: {e}")
@@ -246,14 +227,12 @@ class Crawler:
                             print(page)
                             print(len(all_data))
                             break
-                        # find article links
-                        #links = [a['href'] for a in soup.find_all('a', href=True) if /abs/ in a['href']]
-                        # if not links:
-                        #     break
-                        # all_links.extend(links)
+
                         page +=1
                         time.sleep(1)
                     self.save_data(all_data)
+    def save_data(self, data):
+        self.db.save_crawler_data(data)
 
 Base = declarative_base()
 class User(Base):
@@ -261,6 +240,13 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     email = Column(String, index=True)
+
+class ArticleJson(Base):
+    __tablename__ = "articles_json"
+    id = Column(Integer, primary_key=True)
+    data = Column(JSONB)
+
+
 class DatabaseManager:
     def __init__(self):
         # Database connection parameters
@@ -286,12 +272,28 @@ class DatabaseManager:
         session.add_all(users)
         session.commit()
 
+    def save_crawler_data(self, arxiv_data):
+        session = self.sessionLocal()
+        # json for now, better to get the data and then when I know what I'm doing with it I can organize
+        json = [ArticleJson(data=entry) for entry in arxiv_data]
+        session.bulk_save_objects(json)
+        session.commit()
+
+
     def query_data(self):
         session = self.sessionLocal()
         users = session.query(User).all()
         print("Data from 'users' table:")
         for user in users:
             print(f"ID: {user.id}, Name: {user.name}, Email: {user.email}")
+
+    def query_arxivjson_data(self):
+
+        session = self.sessionLocal()
+        data  = session.query(ArticleJson).all()
+        print("data from 'articles - json' table:")
+        for j in data:
+            print(f"ID: {j.id}, Name: {j.data}")
 
 
 if __name__ == "__main__":
@@ -303,6 +305,7 @@ if __name__ == "__main__":
 
 
 
-    #arxiv_scraper = Crawler()
-    #arxiv_scraper.get_links()
+    arxiv_scraper = Crawler(psql)
+    arxiv_scraper.get_links()
+    psql.query_arxivjson_data()
 
