@@ -255,109 +255,53 @@ class Crawler:
                         time.sleep(1)
                     self.save_data(all_data)
 
-
-class Database:
+Base = declarative_base()
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    email = Column(String, index=True)
+class DatabaseManager:
     def __init__(self):
         # Database connection parameters
-        self.DB_NAME = "arxiv_db"
-        self.DB_USER = "test"
-        self.DB_PASS = "test"
-        self.DB_HOST = "localhost"
-        self.DB_PORT = "5432"
+        DB_NAME = "arxiv_db"
+        DB_USER = "test"
+        DB_PASS = "test"
+        DB_HOST = "localhost"
+        DB_PORT = "5432"
+        # SQLAlchemy setup
+        DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        self.engine = create_engine(DATABASE_URL)
+        self.sessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
-    # Function to connect to the PostgreSQL database
-    def connect_to_db(self):
-        try:
-            conn = psycopg2.connect(
-                dbname=self.DB_NAME,
-                user=self.DB_USER,
-                password=self.DB_PASS,
-                host=self.DB_HOST,
-                port=self.DB_PORT
-            )
-            return conn
-        except Exception as e:
-            print(f"Error connecting to the database: {e}")
-            return None
+    def create_tables(self):
+        Base.metadata.create_all(bind=self.engine)
 
-    # Function to create the users table
-    def create_table(self, conn):
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        id SERIAL PRIMARY KEY,
-                        name VARCHAR(100),
-                        email VARCHAR(100)
-                    )
-                """)
-                conn.commit()
-                print("Table 'users' created successfully.")
-        except Exception as e:
-            print(f"Error creating table: {e}")
-            conn.rollback()
+    def insert_data(self):
+        session = self.sessionLocal()
+        users = [
+            User(name="John Doe", email="john.doe@example.com"),
+            User(name="Jane Smith", email="jane.smith@example.com")
+        ]
+        session.add_all(users)
+        session.commit()
 
-    def create_table_articles(self, conn):
-
-
-
-
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS articles (
-                        id SERIAL PRIMARY KEY,
-                        name VARCHAR(100),
-                        email VARCHAR(100)
-                    )
-                """)
-                conn.commit()
-                print("Table 'users' created successfully.")
-        except Exception as e:
-            print(f"Error creating table: {e}")
-            conn.rollback()
-    # Function to insert sample data into the users table
-    def insert_data(self, conn):
-        try:
-            with conn.cursor() as cursor:
-                insert_query = """
-                    INSERT INTO users (name, email) VALUES (%s, %s)
-                """
-                users = [
-                    ('John Doe', 'john.doe@example.com'),
-                    ('Jane Smith', 'jane.smith@example.com')
-                ]
-                cursor.executemany(insert_query, users)
-                conn.commit()
-                print("Data inserted successfully.")
-        except Exception as e:
-            print(f"Error inserting data: {e}")
-            conn.rollback()
-
-    def insert_article(self, data):
-
-    # Function to query and print data from the users table
-    def query_data(self, conn):
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM users")
-                rows = cursor.fetchall()
-                print("Data from 'users' table:")
-                for row in rows:
-                    print(row)
-        except Exception as e:
-            print(f"Error querying data: {e}")
+    def query_data(self):
+        session = self.sessionLocal()
+        users = session.query(User).all()
+        print("Data from 'users' table:")
+        for user in users:
+            print(f"ID: {user.id}, Name: {user.name}, Email: {user.email}")
 
 
 if __name__ == "__main__":
 
-    psql = Database()
-    conn = psql.connect_to_db()
-    if conn is not None:
-        psql.create_table(conn)
-        psql.insert_data(conn)
-        psql.query_data(conn)
-        conn.close()
+    psql = DatabaseManager()
+    psql.create_tables()
+    psql.insert_data()
+    psql.query_data()
+
+
 
     #arxiv_scraper = Crawler()
     #arxiv_scraper.get_links()
