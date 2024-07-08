@@ -47,44 +47,63 @@ import requests
 from bs4 import BeautifulSoup
 import time
 
+from requests import RequestException
+
+
+from sqlalchemy import create_engine, Column, Integer, String, Text
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+
+import psycopg2
+
+
 class Parser:
 
     def __init__(self):
         pass
 
     def parse_title(self, article):
-        title_tag = article.find_next_sibling('dd').find('div', class_='list-title')
-        if title_tag:
-            return title_tag.get_text(strip=True).replace('Tittle:', '').strip()
-
+        dd_tag = article.find_next_sibling('dd')
+        if dd_tag:
+            title_tag = dd_tag.find('div', class_='list-title')
+            if title_tag:
+                return title_tag.get_text(strip=True).replace('Tittle:', '').strip()
 
     def parse_authors(self, article):
-        author_tags = article.find_next_sibling('dd').find('div', class_='list-authors').find_all('a')
-        if author_tags:
-            return [author.get_text(strip=True) for author in author_tags]
+        dd_tag = article.find_next_sibling('dd')
+        if dd_tag:
+            author_tags = dd_tag.find('div', class_='list-authors').find_all('a')
+            if author_tags:
+                return [author.get_text(strip=True) for author in author_tags]
 
     def parse_subjects(self, article):
-        subject_tag = article.find_next_sibling('dd').find('div', class_='list-subjects')
-        if subject_tag:
-            return subject_tag.get_text(strip=True).replace('Subjects:', '').strip()
+        dd_tag = article.find_next_sibling('dd')
+        if dd_tag:
+            subject_tag = dd_tag.find('div', class_='list-subjects')
+            if subject_tag:
+                return subject_tag.get_text(strip=True).replace('Subjects:', '').strip()
 
     def parse_links(self, article):
         link_info = {}
         link_tags = article.find_all('a')
-        for link in link_tags:
-            href = link.get('href')
-            if href and 'abs' in link.get('href'):
-                link_info['abstract'] = link.get('href')
-            if href and 'pdf' in link.get('href'):
-                link_info['pdf'] = link.get('href')
-            if href and 'html' in link.get('href'):
-                link_info['html'] = link.get('href')
-            if href and 'format' in link.get('href'):
-                link_info['other_formats'] = link.get('href')
+        if link_tags:
+            for link in link_tags:
+                href = link.get('href')
+                if href and 'abs' in link.get('href'):
+                    link_info['abstract'] = link.get('href')
+                if href and 'pdf' in link.get('href'):
+                    link_info['pdf'] = link.get('href')
+                if href and 'html' in link.get('href'):
+                    link_info['html'] = link.get('href')
+                if href and 'format' in link.get('href'):
+                    link_info['other_formats'] = link.get('href')
         return link_info
-class LinkScraper:
+
+
+class Crawler:
 
     def __init__(self):
+        self.user_agent = "Googlebot"
         self.base_url = "https://arxiv.org"
         self.categories = [
             "econ",
@@ -136,14 +155,11 @@ class LinkScraper:
 
             for data in article_data:
                 print(data)
+        return article_data
+
 
     def parse_soup_test(self):
-        """
 
-
-
-        :return:
-        """
         print("TESTING")
         filename = 'soup_page2.html'
         with open(filename, 'r', encoding='utf-8') as file:
@@ -190,7 +206,6 @@ class LinkScraper:
             for data in article_data:
                 print(data)
 
-
     def get_links(self):
         base_url = self.base_url
         months = range(1,13)
@@ -202,6 +217,7 @@ class LinkScraper:
         month = 10
         category = "hep-th"
         years = [year]
+        years = [2020]
         months = [month]
         categories = [category]
         for category in categories:
@@ -209,7 +225,7 @@ class LinkScraper:
                 for month in months:
 
                     page = 0
-                    all_links = []
+                    all_data = []
                     while True:
                         #get URL data
                         url = f"{base_url}/list/{category}/{year}-{month}?skip={page*page_size}&show={page_size}"
@@ -223,7 +239,13 @@ class LinkScraper:
                             print(f"url status code: {response.status_code}")
 
                         data = self.parse_html(response.content)
-                        break
+                        all_data.extend(data)
+                        if not data:
+                            print("no more data!")
+                            print("page=")
+                            print(page)
+                            print(len(all_data))
+                            break
                         # find article links
                         #links = [a['href'] for a in soup.find_all('a', href=True) if /abs/ in a['href']]
                         # if not links:
@@ -231,13 +253,112 @@ class LinkScraper:
                         # all_links.extend(links)
                         page +=1
                         time.sleep(1)
+                    self.save_data(all_data)
+
+
+class Database:
+    def __init__(self):
+        # Database connection parameters
+        self.DB_NAME = "arxiv_db"
+        self.DB_USER = "test"
+        self.DB_PASS = "test"
+        self.DB_HOST = "localhost"
+        self.DB_PORT = "5432"
+
+    # Function to connect to the PostgreSQL database
+    def connect_to_db(self):
+        try:
+            conn = psycopg2.connect(
+                dbname=self.DB_NAME,
+                user=self.DB_USER,
+                password=self.DB_PASS,
+                host=self.DB_HOST,
+                port=self.DB_PORT
+            )
+            return conn
+        except Exception as e:
+            print(f"Error connecting to the database: {e}")
+            return None
+
+    # Function to create the users table
+    def create_table(self, conn):
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(100),
+                        email VARCHAR(100)
+                    )
+                """)
+                conn.commit()
+                print("Table 'users' created successfully.")
+        except Exception as e:
+            print(f"Error creating table: {e}")
+            conn.rollback()
+
+    def create_table_articles(self, conn):
+
+
+
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS articles (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(100),
+                        email VARCHAR(100)
+                    )
+                """)
+                conn.commit()
+                print("Table 'users' created successfully.")
+        except Exception as e:
+            print(f"Error creating table: {e}")
+            conn.rollback()
+    # Function to insert sample data into the users table
+    def insert_data(self, conn):
+        try:
+            with conn.cursor() as cursor:
+                insert_query = """
+                    INSERT INTO users (name, email) VALUES (%s, %s)
+                """
+                users = [
+                    ('John Doe', 'john.doe@example.com'),
+                    ('Jane Smith', 'jane.smith@example.com')
+                ]
+                cursor.executemany(insert_query, users)
+                conn.commit()
+                print("Data inserted successfully.")
+        except Exception as e:
+            print(f"Error inserting data: {e}")
+            conn.rollback()
+
+    def insert_article(self, data):
+
+    # Function to query and print data from the users table
+    def query_data(self, conn):
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM users")
+                rows = cursor.fetchall()
+                print("Data from 'users' table:")
+                for row in rows:
+                    print(row)
+        except Exception as e:
+            print(f"Error querying data: {e}")
 
 
 if __name__ == "__main__":
-    # test =  LinkScraper()
-    # test.parse_soup_test()
 
+    psql = Database()
+    conn = psql.connect_to_db()
+    if conn is not None:
+        psql.create_table(conn)
+        psql.insert_data(conn)
+        psql.query_data(conn)
+        conn.close()
 
-    arxiv_scraper = LinkScraper()
-    arxiv_scraper.get_links()
+    #arxiv_scraper = Crawler()
+    #arxiv_scraper.get_links()
 
