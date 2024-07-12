@@ -1,5 +1,13 @@
+
+"""
+web scraper for arxiv.org
+
+
 """
 
+
+### IN PROGRESS NOTES
+"""
 what data am I collection?
 - title
 - author
@@ -40,8 +48,16 @@ anticipated issues:
 - I'm going to be rate limited on #requests
 - rate limited on data
 
+.....................................
+current webscraper
+- gets article meta data (title, author, subjects, html link, pdf link, abstract link)
+and saves it as json for requested years/months/categories
 
-
+Potential TODOs:
+- organize requested data into tables (one for articles, one for
+authors, etc
+- make a second crawler to download the pdf or html data and store that
+- dead letter queue
 """
 import requests
 import time
@@ -65,7 +81,8 @@ class Parser:
         if dd_tag:
             title_tag = dd_tag.find('div', class_='list-title')
             if title_tag:
-                return title_tag.get_text(strip=True).replace('Tittle:', '').strip()
+                t = len("Title:")
+                return title_tag.get_text(strip=True).replace('Tittle:', '').strip()[6:]
 
     def parse_authors(self, article):
         dd_tag = article.find_next_sibling('dd')
@@ -115,7 +132,10 @@ class Crawler:
 
     def parse_total_entries(self, html_content):
         soup = BeautifulSoup(html_content,'html.parser')
-        paging_info = soup.find('div', class_='paging').get_text(strip=True)
+        paging_div = soup.find('div', class_='paging')
+        if not paging_div:
+            return 99999
+        paging_info = paging_div.get_text(strip=True)
         digits = [char for char in paging_info if char.isdigit()]
         entries = int(''.join(digits))
         return entries
@@ -156,9 +176,9 @@ class Crawler:
         years = range(1991, 2025)
         page_size = 1000
 
+        #"econ",
         categories = [
-            "econ",
-            "eecs",
+            "eess",
             "stat",
             "q-fin",
             "q-bio",
@@ -179,22 +199,37 @@ class Crawler:
             "quant-ph"
         ]
 
+        categories = [
+            "cond-mat",
+            "gr-qc",
+            "hep-ex",
+            "hep-lat",
+            "hep-ph",
+            "hep-th",
+            "math-ph",
+            "nlin",
+            "nucl-ex",
+            "nucl-th",
+            "physics",
+            "quant-ph"
+        ]
+
         years = {
             "econ": range(2017, 2025),
-            "eecs": range(2017, 2025),
+            "eess": range(2017, 2025),
             "stat": range(2007, 2025),
             "q-fin": range(2008, 2025),
             "q-bio": range(2003, 2025),
             "cs": range(1993, 2025),
             "math": range(1992, 2025),
             "astro-ph": range(1992, 2025),
-            "cond-mat": range(1992, 2025),
+            "cond-mat": range(1992, 2025), #for now, normally 1992
             "gr-qc": range(1992, 2025),
             "hep-ex": range(1994, 2025),
             "hep-lat": range(1992, 2025),
             "hep-ph": range(1992, 2025),
             "hep-th": range(1991, 2025),
-            "math-ph": range(1996, 2025),
+            "math-ph": range(2017, 2025), #1996
             "nlin": range(1993, 2025),
             "nucl-ex": range(1994, 2025),
             "nucl-th": range(1992, 2025),
@@ -202,7 +237,7 @@ class Crawler:
             "quant-ph": range(1994, 2025)
         }
 
-        categories = ["econ", "eecs"]
+        #categories = ["econ"]
         for category in categories:
             year_range = years[category]
             for year in year_range:
@@ -227,6 +262,7 @@ class Crawler:
                         hash_val = hash(response.content)
                         entry_number = self.parse_total_entries(response.content)
                         all_data.extend(data)
+                        time.sleep(15)
                         if not data or hash_val==prior_hash_val or page*page_size + page_size > entry_number:
                             print("no more data!")
                             print("page=")
@@ -236,8 +272,8 @@ class Crawler:
 
                         prior_hash_val = hash_val
                         page +=1
-                        time.sleep(15)
                     self.save_data(all_data)
+        print('crawl finished')
     def save_data(self, data):
         self.db.save_crawler_data(data)
 
@@ -248,11 +284,21 @@ class User(Base):
     name = Column(String, index=True)
     email = Column(String, index=True)
 
-class ArticleJson(Base):
-    __tablename__ = "articles_json"
-    id = Column(Integer, primary_key=True)
-    data = Column(JSONB)
+# class ArticleJson(Base):
+#     __tablename__ = "articles_json"
+#     id = Column(Integer, primary_key=True)
+#     data = Column(JSONB)
 
+class Article(Base):
+    __tablename__ = "articles"
+    id = Column(Integer, primary_key = True)
+    title = Column(String, index=True, nullable=False)
+    authors = Column(Text)
+    subjects = Column(Text)
+    abstract = Column(String)
+    pdf = Column(String)
+    html = Column(String)
+    other = Column(String)
 
 class DatabaseManager:
     def __init__(self):
@@ -279,12 +325,32 @@ class DatabaseManager:
         session.add_all(users)
         session.commit()
 
-    def save_crawler_data(self, arxiv_data):
+    def save_crawler_data_json(self, arxiv_data):
         session = self.sessionLocal()
         # json for now, better to get the data and then when I know what I'm doing with it I can organize
         json = [ArticleJson(data=entry) for entry in arxiv_data]
         session.bulk_save_objects(json)
         session.commit()
+
+    def save_crawler_data(self, arxiv_data):
+        session = self.sessionLocal()
+        # json for now, better to get the data and then when I know what I'm doing with it I can organize
+        articles = []
+        for entry in arxiv_data:
+            new_article = Article(
+                title = entry["title"],
+                authors = entry["authors"],
+                subjects = entry["subjects"],
+                abstract = entry["links"].get("abstract"),
+                pdf = entry["links"].get("pdf"),
+                html = entry["links"].get("html"),
+                other = entry["links"].get("other")
+            )
+            articles.append(new_article)
+        session.bulk_save_objects(articles)
+        session.commit()
+
+
 
 
     def query_data(self):
@@ -314,5 +380,5 @@ if __name__ == "__main__":
 
     arxiv_scraper = Crawler(psql)
     arxiv_scraper.get_links()
-    psql.query_arxivjson_data()
+    #psql.query_arxivjson_data()
 
